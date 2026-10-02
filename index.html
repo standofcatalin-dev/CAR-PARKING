@@ -15,7 +15,7 @@
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  canvas { display: block; width: 100%; height: 100%; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
   #hud {
     position: fixed;
     top: 10px; left: 10px;
@@ -24,15 +24,16 @@
     text-shadow: 0 0 8px #ff00ff;
     pointer-events: none;
     line-height: 1.6;
+    z-index: 10;
   }
   #controls {
     position: fixed;
     bottom: 20px;
-    width: 100%;
+    left: 0; right: 0;
     display: flex;
     justify-content: space-between;
     padding: 0 20px;
-    pointer-events: none;
+    z-index: 10;
   }
   .btn {
     width: 70px; height: 70px;
@@ -44,9 +45,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: auto;
     box-shadow: 0 0 15px #ff00ff;
     transition: transform 0.1s;
+    user-select: none;
+    touch-action: none;
   }
   .btn:active { transform: scale(0.9); background: rgba(255,0,255,0.5); }
 </style>
@@ -66,13 +68,16 @@
 
 <script>
 // === Telegram ===
-const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
+if (window.Telegram?.WebApp) {
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+}
 
 // === Canvas ===
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-let W, H;
+let W = window.innerWidth;
+let H = window.innerHeight;
 
 function resize() {
   W = canvas.width = window.innerWidth;
@@ -81,21 +86,26 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// === Земля ===
-const GROUND_Y = () => H - 120;
-
-// === Машина M5 ===
+// === Машина ===
 const car = {
-  x: 100,
+  x: 150,
   y: 0,
   vx: 0,
   vy: 0,
-  angle: 0,        // наклон кузова
-  wheelAngle: 0,   // вращение колёс
+  angle: 0,
+  wheelAngle: 0,
   onGround: true,
   width: 90,
   height: 30,
 };
+
+// Функция земли — всегда ниже экрана на 120px
+function groundY() {
+  return H - 120;
+}
+
+// Поставим машину на землю сразу
+car.y = groundY() - car.height;
 
 // === Физика ===
 const GRAVITY = 0.8;
@@ -116,34 +126,40 @@ document.addEventListener('keyup', e => {
   if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
 });
 
-// Кнопки для тача
-const bindBtn = (id, key) => {
+// Кнопки тача
+function bindBtn(id, key) {
   const el = document.getElementById(id);
-  el.addEventListener('touchstart', e => { e.preventDefault(); keys[key] = true; });
-  el.addEventListener('touchend', e => { e.preventDefault(); keys[key] = false; });
-  el.addEventListener('mousedown', () => keys[key] = true);
-  el.addEventListener('mouseup', () => keys[key] = false);
-  el.addEventListener('mouseleave', () => keys[key] = false);
-};
+  const on  = e => { e.preventDefault(); keys[key] = true; };
+  const off = e => { e.preventDefault(); keys[key] = false; };
+  el.addEventListener('touchstart', on, {passive:false});
+  el.addEventListener('touchend', off, {passive:false});
+  el.addEventListener('touchcancel', off, {passive:false});
+  el.addEventListener('mousedown', on);
+  el.addEventListener('mouseup', off);
+  el.addEventListener('mouseleave', off);
+}
 bindBtn('btnLeft', 'left');
 bindBtn('btnRight', 'right');
 
 // === Следы шин ===
 const skidMarks = [];
-const MAX_MARKS = 200;
 
-// === Фон: горы и звёзды ===
-const stars = Array.from({length: 60}, () => ({
-  x: Math.random() * 2000,
-  y: Math.random() * (H * 0.5),
-  r: Math.random() * 1.5 + 0.5,
-}));
+// === Звёзды ===
+const stars = [];
+for (let i = 0; i < 80; i++) {
+  stars.push({
+    x: Math.random(),
+    y: Math.random() * 0.5,
+    r: Math.random() * 1.5 + 0.5,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
 
 // === Игровой цикл ===
 function update() {
-  const ground = GROUND_Y();
+  const ground = groundY();
 
-  // Ускорение / торможение
+  // Ускорение
   if (keys.right) {
     car.vx += ACCEL;
   } else if (keys.left) {
@@ -153,17 +169,22 @@ function update() {
     if (Math.abs(car.vx) < 0.05) car.vx = 0;
   }
 
-  // Ограничение скорости
-  car.vx = Math.max(-MAX_SPEED * 0.5, Math.min(MAX_SPEED, car.vx));
+  // Ограничение
+  if (car.vx > MAX_SPEED) car.vx = MAX_SPEED;
+  if (car.vx < -MAX_SPEED * 0.5) car.vx = -MAX_SPEED * 0.5;
 
   // Гравитация
   car.vy += GRAVITY;
 
-  // Позиция
+  // Движение
   car.x += car.vx;
   car.y += car.vy;
 
-  // Коллизия с землёй
+  // Ограничим по горизонтали
+  if (car.x < 0) { car.x = 0; car.vx = 0; }
+  if (car.x + car.width > W) { car.x = W - car.width; car.vx = 0; }
+
+  // Земля
   if (car.y + car.height >= ground) {
     car.y = ground - car.height;
     car.vy = 0;
@@ -172,26 +193,31 @@ function update() {
     car.onGround = false;
   }
 
-  // Наклон кузова в зависимости от ускорения
+  // Наклон кузова
   const targetAngle = -car.vx * 0.02;
   car.angle += (targetAngle - car.angle) * 0.1;
 
-  // Вращение колёс
+  // Колёса
   car.wheelAngle += car.vx * 0.1;
 
-  // Следы шин (когда на земле и движемся)
+  // Следы шин
   if (car.onGround && Math.abs(car.vx) > 0.5) {
     skidMarks.push({
-      x: car.x - car.vx * 5,
+      x: car.x + 15,
       y: ground - 2,
       alpha: 1,
     });
-    if (skidMarks.length > MAX_MARKS) skidMarks.shift();
+    skidMarks.push({
+      x: car.x + car.width - 20,
+      y: ground - 2,
+      alpha: 1,
+    });
+    if (skidMarks.length > 400) skidMarks.shift();
   }
 
-  // Затухание следов
-  skidMarks.forEach(m => m.alpha -= 0.003);
+  // Затухание
   for (let i = skidMarks.length - 1; i >= 0; i--) {
+    skidMarks[i].alpha -= 0.003;
     if (skidMarks[i].alpha <= 0) skidMarks.splice(i, 1);
   }
 
@@ -200,57 +226,68 @@ function update() {
 }
 
 function drawBackground() {
-  // Небо — градиент заката
+  // Небо
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#1a0033');
-  grad.addColorStop(0.5, '#4a0e4e');
-  grad.addColorStop(0.8, '#ff006e');
-  grad.addColorStop(1, '#ff8c00');
+  grad.addColorStop(0,    '#1a0033');
+  grad.addColorStop(0.45, '#4a0e4e');
+  grad.addColorStop(0.75, '#ff006e');
+  grad.addColorStop(1,    '#ff8c00');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
   // Солнце
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(W * 0.75, H * 0.55, 80, 0, Math.PI * 2);
-  const sunGrad = ctx.createRadialGradient(W*0.75, H*0.55, 0, W*0.75, H*0.55, 80);
-  sunGrad.addColorStop(0, '#ffff00');
+  const sunX = W * 0.75;
+  const sunY = H * 0.55;
+  const sunR = 80;
+  const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR);
+  sunGrad.addColorStop(0,   '#ffff00');
   sunGrad.addColorStop(0.5, '#ff6600');
-  sunGrad.addColorStop(1, 'rgba(255, 0, 100, 0)');
+  sunGrad.addColorStop(1,   'rgba(255, 0, 100, 0)');
   ctx.fillStyle = sunGrad;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
 
   // Звёзды
-  ctx.fillStyle = '#ffffff';
+  const t = Date.now() * 0.001;
   stars.forEach(s => {
-    ctx.globalAlpha = 0.3 + Math.sin(Date.now() * 0.001 + s.x) * 0.3;
+    ctx.globalAlpha = 0.3 + Math.sin(t + s.phase) * 0.4;
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(s.x % W, s.y, s.r, 0, Math.PI * 2);
+    ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.globalAlpha = 1;
+}
 
-  // Сетка на земле (перспектива)
-  const ground = GROUND_Y();
-  ctx.strokeStyle = '#ff00ff';
+function drawGround() {
+  const ground = groundY();
+
+  // Асфальт
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, ground, W, H - ground);
+
+  // Сетка
+  ctx.strokeStyle = 'rgba(255, 0, 255, 0.25)';
   ctx.lineWidth = 1;
-  ctx.globalAlpha = 0.3;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 1; i < 15; i++) {
     const y = ground + i * 8;
+    if (y > H) break;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(W, y);
     ctx.stroke();
   }
-  ctx.globalAlpha = 1;
-}
 
-function drawGround() {
-  const ground = GROUND_Y();
-  // Асфальт
-  ctx.fillStyle = '#0a0a0a';
-  ctx.fillRect(0, ground, W, H - ground);
+  // Вертикальные линии (перспектива)
+  ctx.strokeStyle = 'rgba(255, 0, 255, 0.15)';
+  const offset = (Date.now() * 0.05) % 80;
+  for (let x = -offset; x < W + 80; x += 80) {
+    ctx.beginPath();
+    ctx.moveTo(x, ground);
+    ctx.lineTo(x + 20, H);
+    ctx.stroke();
+  }
 
   // Неоновая линия дороги
   ctx.strokeStyle = '#ff00ff';
@@ -266,7 +303,7 @@ function drawGround() {
 
 function drawSkidMarks() {
   skidMarks.forEach(m => {
-    ctx.fillStyle = `rgba(0, 0, 0, ${m.alpha * 0.6})`;
+    ctx.fillStyle = `rgba(0, 0, 0, ${m.alpha * 0.7})`;
     ctx.fillRect(m.x, m.y, 8, 3);
   });
 }
@@ -277,17 +314,21 @@ function drawCar() {
   const w = car.width;
   const h = car.height;
 
+  // === Колёса (рисуем ПОД кузовом) ===
+  drawWheel(cx + 15, cy + h + 2, 12);
+  drawWheel(cx + w - 20, cy + h + 2, 12);
+
+  // === Кузов ===
   ctx.save();
   ctx.translate(cx + w/2, cy + h/2);
   ctx.rotate(car.angle);
   ctx.translate(-w/2, -h/2);
 
-  // Тень
-  ctx.fillStyle = 'rgba(255, 0, 255, 0.3)';
+  // Тень/свечение
   ctx.shadowColor = '#ff00ff';
   ctx.shadowBlur = 20;
 
-  // Кузов (нижняя часть)
+  // Нижняя часть кузова
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.moveTo(0, h * 0.4);
@@ -297,7 +338,7 @@ function drawCar() {
   ctx.closePath();
   ctx.fill();
 
-  // Крыша (верхняя часть)
+  // Крыша
   ctx.beginPath();
   ctx.moveTo(w * 0.15, h * 0.4);
   ctx.lineTo(w * 0.3, 0);
@@ -307,7 +348,9 @@ function drawCar() {
   ctx.fillStyle = '#e0e0e0';
   ctx.fill();
 
-  // Стекло
+  ctx.shadowBlur = 0;
+
+  // Стёкла
   ctx.fillStyle = '#00ffff';
   ctx.globalAlpha = 0.6;
   ctx.beginPath();
@@ -323,7 +366,7 @@ function drawCar() {
   ctx.fillStyle = '#0066cc';
   ctx.fillRect(w * 0.35, h * 0.5, w * 0.05, h * 0.3);
   ctx.fillStyle = '#6600cc';
-  ctx.fillRect(w * 0.4, h * 0.5, w * 0.05, h * 0.3);
+  ctx.fillRect(w * 0.40, h * 0.5, w * 0.05, h * 0.3);
   ctx.fillStyle = '#cc0000';
   ctx.fillRect(w * 0.45, h * 0.5, w * 0.05, h * 0.3);
 
@@ -354,10 +397,6 @@ function drawCar() {
   }
 
   ctx.restore();
-
-  // Колёса (не вращаются с кузовом — они на земле)
-  drawWheel(cx + 15, cy + h + 2, 12);
-  drawWheel(cx + w - 20, cy + h + 2, 12);
 }
 
 function drawWheel(x, y, r) {
@@ -404,8 +443,6 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-// Старт
-car.y = GROUND_Y() - car.height;
 loop();
 </script>
 </body>
