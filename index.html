@@ -17,38 +17,26 @@
   }
   canvas { display: block; position: fixed; top: 0; left: 0; }
   #hud {
-    position: fixed;
-    top: 12px; left: 12px;
-    color: #ff00ff;
-    font-size: 14px;
+    position: fixed; top: 12px; left: 12px;
+    color: #ff00ff; font-size: 14px;
     text-shadow: 0 0 8px #ff00ff;
-    pointer-events: none;
-    line-height: 1.6;
-    z-index: 10;
+    pointer-events: none; line-height: 1.6; z-index: 10;
   }
   #controls {
-    position: fixed;
-    bottom: 24px;
+    position: fixed; bottom: 24px;
     left: 0; right: 0;
-    display: flex;
-    justify-content: space-between;
-    padding: 0 24px;
-    z-index: 10;
+    display: flex; justify-content: space-between;
+    padding: 0 24px; z-index: 10;
   }
   .btn {
-    width: 76px; height: 76px;
-    border-radius: 50%;
+    width: 76px; height: 76px; border-radius: 50%;
     background: rgba(255, 0, 255, 0.15);
-    border: 2px solid #ff00ff;
-    color: #ff00ff;
-    font-size: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border: 2px solid #ff00ff; color: #ff00ff;
+    font-size: 30px; display: flex;
+    align-items: center; justify-content: center;
     box-shadow: 0 0 15px #ff00ff;
     transition: transform 0.1s, background 0.1s;
-    user-select: none;
-    touch-action: none;
+    user-select: none; touch-action: none;
   }
   .btn:active { transform: scale(0.9); background: rgba(255,0,255,0.5); }
 </style>
@@ -65,7 +53,6 @@
   <div class="btn" id="btnRight">▶</div>
 </div>
 
-<!-- Three.js -->
 <script type="importmap">
 {
   "imports": {
@@ -86,14 +73,11 @@ if (window.Telegram?.WebApp) {
 // === Сцена ===
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a0033);
-scene.fog = new THREE.Fog(0x1a0033, 30, 120);
+scene.fog = new THREE.Fog(0x4a0e4e, 40, 200);
 
 // === Камера ===
 const camera = new THREE.PerspectiveCamera(
-  55,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  300
+  60, window.innerWidth / window.innerHeight, 0.1, 500
 );
 
 // === Рендер ===
@@ -105,186 +89,339 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 // === Свет ===
-// Ambient
-scene.add(new THREE.AmbientLight(0x442266, 0.6));
+scene.add(new THREE.AmbientLight(0x664488, 0.7));
 
 // Солнце
-const sun = new THREE.DirectionalLight(0xffaa66, 1.4);
-sun.position.set(-20, 30, 20);
+const sun = new THREE.DirectionalLight(0xffaa66, 1.6);
+sun.position.set(-30, 40, 20);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -40;
-sun.shadow.camera.right = 40;
-sun.shadow.camera.top = 40;
-sun.shadow.camera.bottom = -40;
+sun.shadow.camera.left = -50;
+sun.shadow.camera.right = 50;
+sun.shadow.camera.top = 50;
+sun.shadow.camera.bottom = -50;
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 100;
+sun.shadow.camera.far = 150;
 scene.add(sun);
 
-// Неоновый подсвет снизу
-const neonLight = new THREE.PointLight(0xff00ff, 1.5, 30);
-neonLight.position.set(0, 1, 0);
+// Неоновая подсветка
+const neonLight = new THREE.PointLight(0xff00ff, 2, 40);
+neonLight.position.set(0, 2, 0);
 scene.add(neonLight);
 
-// === Земля ===
-const groundGeo = new THREE.PlaneGeometry(400, 400);
+// === НЕБО — градиент ===
+const skyGeo = new THREE.SphereGeometry(300, 32, 16);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: {
+    topColor:    { value: new THREE.Color(0x1a0033) },
+    midColor:    { value: new THREE.Color(0x4a0e4e) },
+    bottomColor: { value: new THREE.Color(0xff006e) },
+  },
+  vertexShader: `
+    varying vec3 vPos;
+    void main() {
+      vPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 topColor;
+    uniform vec3 midColor;
+    uniform vec3 bottomColor;
+    varying vec3 vPos;
+    void main() {
+      float h = normalize(vPos).y;
+      vec3 col;
+      if (h > 0.0) {
+        col = mix(midColor, topColor, h);
+      } else {
+        col = mix(midColor, bottomColor, -h);
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+// === Солнце (визуально) ===
+const sunDiskGeo = new THREE.SphereGeometry(15, 32, 16);
+const sunDiskMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+const sunDisk = new THREE.Mesh(sunDiskGeo, sunDiskMat);
+sunDisk.position.set(-80, 30, -150);
+scene.add(sunDisk);
+
+// Свечение солнца
+const sunGlowGeo = new THREE.SphereGeometry(30, 32, 16);
+const sunGlowMat = new THREE.MeshBasicMaterial({
+  color: 0xff6600, transparent: true, opacity: 0.3,
+});
+const sunGlow = new THREE.Mesh(sunGlowGeo, sunGlowMat);
+sunGlow.position.copy(sunDisk.position);
+scene.add(sunGlow);
+
+// === Звёзды ===
+const starsGeo = new THREE.BufferGeometry();
+const starsCount = 800;
+const starsPos = new Float32Array(starsCount * 3);
+for (let i = 0; i < starsCount; i++) {
+  const r = 200 + Math.random() * 80;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.random() * Math.PI * 0.5;
+  starsPos[i*3]     = r * Math.sin(phi) * Math.cos(theta);
+  starsPos[i*3 + 1] = r * Math.cos(phi) + 20;
+  starsPos[i*3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+}
+starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
+const starsMat = new THREE.PointsMaterial({
+  color: 0xffffff, size: 0.8, transparent: true, opacity: 0.8,
+});
+scene.add(new THREE.Points(starsGeo, starsMat));
+
+// === ЗЕМЛЯ ===
+const groundGeo = new THREE.PlaneGeometry(1000, 1000);
 const groundMat = new THREE.MeshStandardMaterial({
-  color: 0x0a0a1a,
-  roughness: 0.9,
-  metalness: 0.1,
+  color: 0x0a0a1a, roughness: 1, metalness: 0,
 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Неоновая сетка на земле
-const grid = new THREE.GridHelper(400, 100, 0xff00ff, 0x6600aa);
+// Неоновая сетка
+const grid = new THREE.GridHelper(1000, 200, 0xff00ff, 0x6600aa);
 grid.position.y = 0.01;
+grid.material.opacity = 0.4;
+grid.material.transparent = true;
 scene.add(grid);
 
-// === Машина M5 ===
+// === ДОРОГА ===
+const roadWidth = 10;
+const roadGeo = new THREE.PlaneGeometry(1000, roadWidth);
+const roadMat = new THREE.MeshStandardMaterial({
+  color: 0x111111, roughness: 0.8, metalness: 0.2,
+});
+const road = new THREE.Mesh(roadGeo, roadMat);
+road.rotation.x = -Math.PI / 2;
+road.position.y = 0.02;
+road.receiveShadow = true;
+scene.add(road);
+
+// Разметка дороги (пунктир)
+for (let i = -200; i < 200; i++) {
+  const dashGeo = new THREE.PlaneGeometry(3, 0.3);
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+  const dash = new THREE.Mesh(dashGeo, dashMat);
+  dash.rotation.x = -Math.PI / 2;
+  dash.position.set(i * 6, 0.03, 0);
+  scene.add(dash);
+}
+
+// Боковые неоновые линии
+[-1, 1].forEach(side => {
+  const lineGeo = new THREE.PlaneGeometry(1000, 0.2);
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+  const line = new THREE.Mesh(lineGeo, lineMat);
+  line.rotation.x = -Math.PI / 2;
+  line.position.set(0, 0.03, side * roadWidth / 2);
+  scene.add(line);
+});
+
+// === ПАЛЬМЫ вдоль дороги ===
+function createPalm(x, z) {
+  const palm = new THREE.Group();
+  // Ствол
+  const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 4, 6);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a2511 });
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.y = 2;
+  trunk.castShadow = true;
+  palm.add(trunk);
+
+  // Листья
+  for (let i = 0; i < 6; i++) {
+    const leafGeo = new THREE.ConeGeometry(0.4, 2.5, 4);
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x00aa44 });
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    const angle = (i / 6) * Math.PI * 2;
+    leaf.position.set(Math.cos(angle) * 0.8, 4.2, Math.sin(angle) * 0.8);
+    leaf.rotation.z = Math.cos(angle) * 0.8;
+    leaf.rotation.x = Math.sin(angle) * 0.8;
+    palm.add(leaf);
+  }
+
+  palm.position.set(x, 0, z);
+  scene.add(palm);
+}
+
+// Раскидываем пальмы вдоль дороги
+for (let i = -20; i < 20; i++) {
+  const x = i * 25 + Math.random() * 5;
+  createPalm(x, roadWidth / 2 + 4 + Math.random() * 3);
+  createPalm(x, -roadWidth / 2 - 4 - Math.random() * 3);
+}
+
+// === ЗДАНИЯ на горизонте ===
+function createBuilding(x, z) {
+  const h = 5 + Math.random() * 15;
+  const w = 2 + Math.random() * 2;
+  const d = 2 + Math.random() * 2;
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x221133, emissive: 0x330055, emissiveIntensity: 0.5,
+  });
+  const b = new THREE.Mesh(geo, mat);
+  b.position.set(x, h / 2, z);
+  b.castShadow = true;
+  scene.add(b);
+
+  // Окна — небольшие светящиеся точки
+  for (let i = 0; i < 5; i++) {
+    const winGeo = new THREE.PlaneGeometry(0.3, 0.4);
+    const winMat = new THREE.MeshBasicMaterial({
+      color: Math.random() > 0.5 ? 0x00ffff : 0xff66ff,
+    });
+    const win = new THREE.Mesh(winGeo, winMat);
+    win.position.set(
+      x + (Math.random() - 0.5) * w,
+      Math.random() * h,
+      z + d / 2 + 0.01
+    );
+    scene.add(win);
+  }
+}
+
+for (let i = 0; i < 20; i++) {
+  createBuilding(
+    (Math.random() - 0.5) * 300,
+    (Math.random() > 0.5 ? 1 : -1) * (25 + Math.random() * 40)
+  );
+}
+
+// === МАШИНА BMW M5 ===
 const car = new THREE.Group();
 
-// Кузов — основная коробка
+// Кузов (нижняя часть — основная)
 const bodyMat = new THREE.MeshStandardMaterial({
-  color: 0xffffff,
-  roughness: 0.4,
-  metalness: 0.7,
+  color: 0xffffff, roughness: 0.35, metalness: 0.75,
 });
-const bodyGeo = new THREE.BoxGeometry(4.2, 0.6, 1.8);
+const bodyGeo = new THREE.BoxGeometry(4.4, 0.7, 1.9);
 const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-bodyMesh.position.y = 0.7;
+bodyMesh.position.y = 0.75;
 bodyMesh.castShadow = true;
 car.add(bodyMesh);
 
-// Капот — сужение спереди
-const hoodGeo = new THREE.BoxGeometry(1.2, 0.4, 1.7);
+// Сужение капота спереди
+const hoodGeo = new THREE.BoxGeometry(1.2, 0.55, 1.8);
 const hoodMesh = new THREE.Mesh(hoodGeo, bodyMat);
-hoodMesh.position.set(2.0, 0.6, 0);
+hoodMesh.position.set(2.1, 0.7, 0);
 hoodMesh.castShadow = true;
 car.add(hoodMesh);
 
 // Крыша кабины
-const roofGeo = new THREE.BoxGeometry(1.8, 0.7, 1.6);
-const roofMesh = new THREE.Mesh(roofGeo, bodyMat);
-roofMesh.position.set(-0.3, 1.35, 0);
-roofMesh.castShadow = true;
-car.add(roofMesh);
-
-// Стёкла (синие светящиеся)
-const glassMat = new THREE.MeshStandardMaterial({
-  color: 0x00ffff,
-  emissive: 0x006677,
-  emissiveIntensity: 0.6,
-  metalness: 0.9,
-  roughness: 0.1,
-  transparent: true,
-  opacity: 0.85,
+const cabinGeo = new THREE.BoxGeometry(2.0, 0.75, 1.7);
+const cabinMat = new THREE.MeshStandardMaterial({
+  color: 0xf0f0f0, roughness: 0.4, metalness: 0.7,
 });
-const glassGeo = new THREE.BoxGeometry(1.5, 0.55, 1.62);
-const glassMesh = new THREE.Mesh(glassGeo, glassMat);
-glassMesh.position.set(-0.3, 1.35, 0);
-car.add(glassMesh);
+const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+cabin.position.set(-0.3, 1.45, 0);
+cabin.castShadow = true;
+car.add(cabin);
 
-// Полоса M — триколор
+// Стёкла
+const glassMat = new THREE.MeshStandardMaterial({
+  color: 0x00ffff, emissive: 0x006677, emissiveIntensity: 0.7,
+  metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.85,
+});
+const glassGeo = new THREE.BoxGeometry(2.02, 0.5, 1.72);
+const glass = new THREE.Mesh(glassGeo, glassMat);
+glass.position.set(-0.3, 1.55, 0);
+car.add(glass);
+
+// Полоса M (триколор)
 const mColors = [0x0066cc, 0x6600cc, 0xcc0000];
 mColors.forEach((color, i) => {
   const stripeMat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.4,
+    color, emissive: color, emissiveIntensity: 0.5,
   });
-  const stripeGeo = new THREE.BoxGeometry(3.5, 0.05, 0.15);
+  const stripeGeo = new THREE.BoxGeometry(3.6, 0.06, 0.18);
   const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-  stripe.position.set(0, 1.01, -0.4 + i * 0.3);
+  stripe.position.set(-0.3, 1.06, -0.5 + i * 0.35);
   car.add(stripe);
 });
 
 // Фары
 const headlightMat = new THREE.MeshStandardMaterial({
-  color: 0xffff00,
-  emissive: 0xffff00,
-  emissiveIntensity: 2,
+  color: 0xffffaa, emissive: 0xffff00, emissiveIntensity: 2.5,
 });
-const headlightGeo = new THREE.BoxGeometry(0.15, 0.25, 0.4);
-[0.5, -0.5].forEach(z => {
+const headlightGeo = new THREE.BoxGeometry(0.15, 0.3, 0.45);
+[0.55, -0.55].forEach(z => {
   const hl = new THREE.Mesh(headlightGeo, headlightMat);
-  hl.position.set(2.55, 0.7, z);
+  hl.position.set(2.7, 0.75, z);
   car.add(hl);
 });
 
 // Стоп-сигналы
-const taillightMat = new THREE.MeshStandardMaterial({
-  color: 0xff0000,
-  emissive: 0xff0000,
-  emissiveIntensity: 0,
-});
-const taillightGeo = new THREE.BoxGeometry(0.15, 0.25, 0.4);
 const taillights = [];
-[0.5, -0.5].forEach(z => {
-  const tl = new THREE.Mesh(taillightGeo, taillightMat.clone());
-  tl.position.set(-2.1, 0.7, z);
+[0.55, -0.55].forEach(z => {
+  const tlMat = new THREE.MeshStandardMaterial({
+    color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0,
+  });
+  const tl = new THREE.Mesh(headlightGeo, tlMat);
+  tl.position.set(-2.25, 0.75, z);
   car.add(tl);
   taillights.push(tl);
 });
 
 // Колёса
-const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 20);
+const wheelGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.35, 20);
 const tireMat = new THREE.MeshStandardMaterial({
-  color: 0x111111,
-  roughness: 0.9,
+  color: 0x0a0a0a, roughness: 0.95,
 });
 const rimMat = new THREE.MeshStandardMaterial({
-  color: 0xcccccc,
-  metalness: 1,
-  roughness: 0.2,
+  color: 0xcccccc, metalness: 1, roughness: 0.15,
 });
 
 const wheels = [];
 const wheelPositions = [
-  [1.4, 0.5, 0.9],
-  [1.4, 0.5, -0.9],
-  [-1.4, 0.5, 0.9],
-  [-1.4, 0.5, -0.9],
+  [1.45, 0.55,  0.95],
+  [1.45, 0.55, -0.95],
+  [-1.5, 0.55,  0.95],
+  [-1.5, 0.55, -0.95],
 ];
 
 wheelPositions.forEach(pos => {
   const wheel = new THREE.Group();
-
   const tire = new THREE.Mesh(wheelGeo, tireMat);
   tire.rotation.x = Math.PI / 2;
   tire.castShadow = true;
   wheel.add(tire);
 
-  // Диск (внутренний цилиндр)
-  const rimGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.32, 12);
+  const rimGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.37, 12);
   const rim = new THREE.Mesh(rimGeo, rimMat);
   rim.rotation.x = Math.PI / 2;
   wheel.add(rim);
 
   wheel.position.set(...pos);
+  wheel.userData.isWheel = true;
   car.add(wheel);
   wheels.push(wheel);
 });
 
-// Тень под машиной (fake, для красоты)
-const shadowGeo = new THREE.PlaneGeometry(4.5, 2);
+scene.add(car);
+
+// Тень-заглушка под машиной (усиливает ощущение контакта)
+const shadowGeo = new THREE.PlaneGeometry(5, 2.4);
 const shadowMat = new THREE.MeshBasicMaterial({
-  color: 0x000000,
-  transparent: true,
-  opacity: 0.5,
+  color: 0x000000, transparent: true, opacity: 0.5,
 });
 const carShadow = new THREE.Mesh(shadowGeo, shadowMat);
 carShadow.rotation.x = -Math.PI / 2;
-carShadow.position.y = 0.02;
+carShadow.position.y = 0.05;
 car.add(carShadow);
-
-scene.add(car);
 
 // === Управление ===
 const keys = { left: false, right: false };
-
 document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
   if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
@@ -310,50 +447,45 @@ bindBtn('btnRight', 'right');
 
 // === Физика ===
 let speed = 0;
-const MAX_SPEED = 0.35;
-const ACCEL = 0.012;
-const BRAKE = 0.02;
+const MAX_SPEED = 0.6;
+const ACCEL = 0.02;
+const BRAKE = 0.04;
 const FRICTION = 0.96;
 
-// === Частицы выхлопа ===
+// === Выхлоп ===
 const exhaustParticles = [];
-const exhaustGeo = new THREE.SphereGeometry(0.12, 6, 6);
-const exhaustMat = new THREE.MeshBasicMaterial({
-  color: 0xff8800,
-  transparent: true,
-  opacity: 0.8,
-});
+const exhaustGeo = new THREE.SphereGeometry(0.15, 6, 6);
 
 function spawnExhaust() {
-  const p = new THREE.Mesh(exhaustGeo, exhaustMat.clone());
-  p.position.set(-2.2, 0.4, 0.6); // задний выхлоп
-  car.parent.add(p);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xff8800, transparent: true, opacity: 0.85,
+  });
+  const p = new THREE.Mesh(exhaustGeo, mat);
+  p.position.set(-2.3, 0.4, 0.7);
+  scene.add(p);
   exhaustParticles.push({
-    mesh: p,
-    life: 1,
-    vx: -0.05 - Math.random() * 0.05,
-    vy: 0.02 + Math.random() * 0.03,
+    mesh: p, life: 1,
+    vx: -0.1 - Math.random() * 0.1,
+    vy: 0.03 + Math.random() * 0.04,
   });
 }
 
 // === Следы шин ===
 const skidMarks = [];
-const skidGeo = new THREE.PlaneGeometry(0.3, 0.4);
-const skidMat = new THREE.MeshBasicMaterial({
-  color: 0x000000,
-  transparent: true,
-  opacity: 0.7,
-});
+const skidGeo = new THREE.PlaneGeometry(0.35, 0.5);
 
 function spawnSkid(x, z) {
-  const mark = new THREE.Mesh(skidGeo, skidMat);
-  mark.rotation.x = -Math.PI / 2;
-  mark.position.set(x, 0.01, z);
-  scene.add(mark);
-  skidMarks.push({ mesh: mark, life: 1 });
-  if (skidMarks.length > 200) {
-    const old = skidMarks.shift();
-    scene.remove(old.mesh);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 0.7,
+  });
+  const m = new THREE.Mesh(skidGeo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.06, z);
+  scene.add(m);
+  skidMarks.push({ mesh: m, life: 1 });
+  if (skidMarks.length > 300) {
+    scene.remove(skidMarks[0].mesh);
+    skidMarks.shift();
   }
 }
 
@@ -381,19 +513,16 @@ function animate() {
     speed *= FRICTION;
     if (Math.abs(speed) < 0.001) speed = 0;
   }
+  speed = Math.max(-MAX_SPEED * 0.5, Math.min(MAX_SPEED, speed));
 
-  speed = Math.max(-MAX_SPEED * 0.6, Math.min(MAX_SPEED, speed));
-
-  // Движение вперёд (по X)
+  // Движение вперёд
   car.position.x += speed * dt * 10;
 
   // Колёса крутятся
-  wheels.forEach(w => {
-    w.rotation.z -= speed * 0.3;
-  });
+  wheels.forEach(w => { w.rotation.z -= speed * 0.35; });
 
   // Стоп-сигналы
-  const braking = keys.left && speed > 0.01;
+  const braking = keys.left && speed > 0.02;
   taillights.forEach(t => {
     t.material.emissiveIntensity = braking ? 3 : 0;
   });
@@ -405,16 +534,16 @@ function animate() {
     exhaustTimer = 0;
   }
 
-  // Обновление частиц выхлопа
+  // Частицы
   for (let i = exhaustParticles.length - 1; i >= 0; i--) {
     const p = exhaustParticles[i];
     p.mesh.position.x += p.vx * dt;
     p.mesh.position.y += p.vy * dt;
     p.life -= 0.02 * dt;
-    p.mesh.material.opacity = p.life * 0.8;
+    p.mesh.material.opacity = p.life * 0.85;
     p.mesh.scale.setScalar(1 + (1 - p.life) * 2);
     if (p.life <= 0) {
-      car.parent.remove(p.mesh);
+      scene.remove(p.mesh);
       exhaustParticles.splice(i, 1);
     }
   }
@@ -423,12 +552,9 @@ function animate() {
   skidTimer += dt;
   if (Math.abs(speed) > 0.05 && skidTimer > 3) {
     skidTimer = 0;
-    // Задние колёса
-    spawnSkid(car.position.x - 1.4, car.position.z + 0.9);
-    spawnSkid(car.position.x - 1.4, car.position.z - 0.9);
+    spawnSkid(car.position.x - 1.5, 0.95);
+    spawnSkid(car.position.x - 1.5, -0.95);
   }
-
-  // Затухание следов
   for (let i = skidMarks.length - 1; i >= 0; i--) {
     const m = skidMarks[i];
     m.life -= 0.002 * dt;
@@ -439,31 +565,29 @@ function animate() {
     }
   }
 
-  // Камера — следует за машиной сзади-сбоку
-  const camTargetX = car.position.x - 7;
-  const camTargetY = 4;
-  const camTargetZ = 6;
-  camera.position.x += (camTargetX - camera.position.x) * 0.05;
-  camera.position.y += (camTargetY - camera.position.y) * 0.05;
-  camera.position.z += (camTargetZ - camera.position.z) * 0.05;
-  camera.lookAt(car.position.x + 2, 1, 0);
+  // Камера сзади-сбоку
+  const camX = car.position.x - 9;
+  const camY = 5;
+  const camZ = 8;
+  camera.position.x += (camX - camera.position.x) * 0.06;
+  camera.position.y += (camY - camera.position.y) * 0.06;
+  camera.position.z += (camZ - camera.position.z) * 0.06;
+  camera.lookAt(car.position.x + 3, 1.2, 0);
 
-  // Неоновый свет следует за машиной
+  // Неон за машиной
   neonLight.position.x = car.position.x;
 
-  // HUD
   speedEl.textContent = Math.abs(Math.round(speed * 700));
 
   renderer.render(scene, camera);
 }
 
 // Стартовая позиция камеры
-camera.position.set(-7, 4, 6);
-camera.lookAt(2, 1, 0);
+camera.position.set(-9, 5, 8);
+camera.lookAt(3, 1.2, 0);
 
 animate();
 
-// === Resize ===
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
