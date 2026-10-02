@@ -39,6 +39,14 @@
   }
   .btn:active { transform: scale(0.9); background: rgba(255,0,255,0.5); }
   .btn.small { width: 60px; height: 60px; font-size: 22px; }
+  #error {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ff0000; background: rgba(0,0,0,0.8);
+    padding: 20px; font-size: 14px; max-width: 90%;
+    display: none; z-index: 100; border-radius: 8px;
+    word-break: break-all;
+  }
 </style>
 </head>
 <body>
@@ -59,835 +67,388 @@
   </div>
 </div>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-  }
-}
-</script>
+<div id="error"></div>
 
-<script type="module">
-import * as THREE from 'three';
+<!-- Three.js через CDN — БЕЗ importmap -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
-// === Telegram ===
-if (window.Telegram?.WebApp) {
-  window.Telegram.WebApp.ready();
-  window.Telegram.WebApp.expand();
-}
-
-// === Массив стоп-сигналов (объявляем ДО использования) ===
-const taillights = [];
-
-// === Сцена / Камера / Рендер ===
-const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x1a0033, 60, 260);
-
-const camera = new THREE.PerspectiveCamera(
-  60, window.innerWidth / window.innerHeight, 0.1, 500
-);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.body.appendChild(renderer.domElement);
-
-// === Свет ===
-scene.add(new THREE.AmbientLight(0x664488, 0.7));
-
-const sun = new THREE.DirectionalLight(0xffccaa, 1.4);
-sun.position.set(-30, 50, 30);
-sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -50;
-sun.shadow.camera.right = 50;
-sun.shadow.camera.top = 50;
-sun.shadow.camera.bottom = -50;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 200;
-scene.add(sun);
-
-const fill = new THREE.PointLight(0xff00ff, 0.8, 60);
-fill.position.set(0, 5, 0);
-scene.add(fill);
-
-// === НЕБО ===
-const skyMat = new THREE.ShaderMaterial({
-  side: THREE.BackSide,
-  uniforms: {
-    top:    { value: new THREE.Color(0x0a0015) },
-    mid:    { value: new THREE.Color(0x3a0a55) },
-    bottom: { value: new THREE.Color(0xff0088) },
-  },
-  vertexShader: `varying vec3 vPos;
-    void main(){ vPos = position;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-  fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bottom;
-    varying vec3 vPos;
-    void main(){ float h = normalize(vPos).y; vec3 c;
-      if(h>0.0) c = mix(mid, top, h); else c = mix(mid, bottom, -h);
-      gl_FragColor = vec4(c,1.0); }`,
-});
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(300, 32, 16), skyMat));
-
-// === Солнце ===
-const sunDisk = new THREE.Mesh(
-  new THREE.SphereGeometry(15, 32, 16),
-  new THREE.MeshBasicMaterial({ color: 0xffaa00 })
-);
-sunDisk.position.set(-90, 35, -180);
-scene.add(sunDisk);
-const sunGlow = new THREE.Mesh(
-  new THREE.SphereGeometry(35, 32, 16),
-  new THREE.MeshBasicMaterial({
-    color: 0xff6600, transparent: true, opacity: 0.25,
-  })
-);
-sunGlow.position.copy(sunDisk.position);
-scene.add(sunGlow);
-
-// === Звёзды ===
-const starsGeo = new THREE.BufferGeometry();
-const starsCount = 900;
-const starsPos = new Float32Array(starsCount * 3);
-for (let i = 0; i < starsCount; i++) {
-  const r = 200 + Math.random() * 80;
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.random() * Math.PI * 0.5;
-  starsPos[i*3]     = r * Math.sin(phi) * Math.cos(theta);
-  starsPos[i*3 + 1] = r * Math.cos(phi) + 30;
-  starsPos[i*3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-}
-starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
-scene.add(new THREE.Points(starsGeo, new THREE.PointsMaterial({
-  color: 0xffffff, size: 0.9, transparent: true, opacity: 0.85,
-})));
-
-// === Земля ===
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(1200, 1200),
-  new THREE.MeshStandardMaterial({
-    color: 0x0a0a1a, roughness: 1, metalness: 0,
-  })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
-
-const grid = new THREE.GridHelper(1200, 240, 0xff00ff, 0x6600aa);
-grid.position.y = 0.01;
-grid.material.opacity = 0.35;
-grid.material.transparent = true;
-scene.add(grid);
-
-// === Дорога (вдоль Z) ===
-const ROAD_W = 14;
-const ROAD_L = 1200;
-
-const road = new THREE.Mesh(
-  new THREE.PlaneGeometry(ROAD_W, ROAD_L),
-  new THREE.MeshStandardMaterial({
-    color: 0x151515, roughness: 0.85, metalness: 0.15,
-  })
-);
-road.rotation.x = -Math.PI / 2;
-road.position.y = 0.02;
-road.receiveShadow = true;
-scene.add(road);
-
-// Разметка
-for (let i = -80; i < 80; i++) {
-  const dash = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.3, 3),
-    new THREE.MeshBasicMaterial({ color: 0xffff00 })
-  );
-  dash.rotation.x = -Math.PI / 2;
-  dash.position.set(0, 0.03, i * 8);
-  scene.add(dash);
-}
-
-// Неоновые линии
-[-1, 1].forEach(side => {
-  const line = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.25, ROAD_L),
-    new THREE.MeshBasicMaterial({ color: 0xff00ff })
-  );
-  line.rotation.x = -Math.PI / 2;
-  line.position.set(side * ROAD_W / 2, 0.03, 0);
-  scene.add(line);
+<script>
+// Показать ошибки прямо на экране
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('error');
+  el.style.display = 'block';
+  el.textContent = '❌ ' + e.message + ' (' + (e.filename||'').split('/').pop() + ':' + e.lineno + ')';
 });
 
-// === Пальмы ===
-function createPalm(x, z) {
-  const palm = new THREE.Group();
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.28, 5, 6),
-    new THREE.MeshStandardMaterial({ color: 0x4a2511 })
-  );
-  trunk.position.y = 2.5;
-  trunk.castShadow = true;
-  palm.add(trunk);
-
-  for (let i = 0; i < 7; i++) {
-    const leaf = new THREE.Mesh(
-      new THREE.ConeGeometry(0.35, 2.8, 4),
-      new THREE.MeshStandardMaterial({ color: 0x00aa44 })
-    );
-    const a = (i / 7) * Math.PI * 2;
-    leaf.position.set(Math.cos(a) * 0.9, 5.1, Math.sin(a) * 0.9);
-    leaf.rotation.z = Math.cos(a) * 0.9;
-    leaf.rotation.x = Math.sin(a) * 0.9;
-    palm.add(leaf);
+try {
+  // Telegram
+  if (window.Telegram && window.Telegram.WebApp) {
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
   }
-  palm.position.set(x, 0, z);
-  scene.add(palm);
-}
 
-for (let i = -30; i < 30; i++) {
-  const z = i * 22 + Math.random() * 6;
-  createPalm(-ROAD_W / 2 - 4 - Math.random() * 3, z);
-  createPalm( ROAD_W / 2 + 4 + Math.random() * 3, z);
-}
+  // === Сцена ===
+  var scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x1a0033, 60, 260);
 
-// === Здания ===
-function createBuilding(x, z) {
-  const h = 6 + Math.random() * 22;
-  const w = 3 + Math.random() * 3;
-  const d = 3 + Math.random() * 3;
-  const b = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({
-      color: 0x1a0a33, emissive: 0x330055, emissiveIntensity: 0.6,
+  var camera = new THREE.PerspectiveCamera(
+    60, window.innerWidth / window.innerHeight, 0.1, 500
+  );
+
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // === Свет ===
+  scene.add(new THREE.AmbientLight(0x664488, 0.8));
+
+  var sun = new THREE.DirectionalLight(0xffccaa, 1.4);
+  sun.position.set(-30, 50, 30);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -50;
+  sun.shadow.camera.right = 50;
+  sun.shadow.camera.top = 50;
+  sun.shadow.camera.bottom = -50;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 200;
+  scene.add(sun);
+
+  var fill = new THREE.PointLight(0xff00ff, 0.8, 60);
+  fill.position.set(0, 5, 0);
+  scene.add(fill);
+
+  // === НЕБО ===
+  var skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {
+      top:    { value: new THREE.Color(0x0a0015) },
+      mid:    { value: new THREE.Color(0x3a0a55) },
+      bottom: { value: new THREE.Color(0xff0088) }
+    },
+    vertexShader:
+      'varying vec3 vPos;' +
+      'void main(){ vPos = position;' +
+      'gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader:
+      'uniform vec3 top; uniform vec3 mid; uniform vec3 bottom;' +
+      'varying vec3 vPos;' +
+      'void main(){ float h = normalize(vPos).y; vec3 c;' +
+      'if(h>0.0) c = mix(mid, top, h); else c = mix(mid, bottom, -h);' +
+      'gl_FragColor = vec4(c,1.0); }'
+  });
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(300, 32, 16), skyMat));
+
+  // === Солнце ===
+  var sunDisk = new THREE.Mesh(
+    new THREE.SphereGeometry(15, 32, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffaa00 })
+  );
+  sunDisk.position.set(-90, 35, -180);
+  scene.add(sunDisk);
+
+  var sunGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(35, 32, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0xff6600, transparent: true, opacity: 0.25
     })
   );
-  b.position.set(x, h / 2, z);
-  b.castShadow = true;
-  scene.add(b);
+  sunGlow.position.copy(sunDisk.position);
+  scene.add(sunGlow);
 
-  for (let i = 0; i < 6; i++) {
-    const win = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.4, 0.5),
-      new THREE.MeshBasicMaterial({
-        color: Math.random() > 0.5 ? 0x00ffff : 0xff66ff,
+  // === Звёзды ===
+  var starsGeo = new THREE.BufferGeometry();
+  var starsCount = 900;
+  var starsPos = new Float32Array(starsCount * 3);
+  for (var i = 0; i < starsCount; i++) {
+    var r = 200 + Math.random() * 80;
+    var theta = Math.random() * Math.PI * 2;
+    var phi = Math.random() * Math.PI * 0.5;
+    starsPos[i*3]     = r * Math.sin(phi) * Math.cos(theta);
+    starsPos[i*3 + 1] = r * Math.cos(phi) + 30;
+    starsPos[i*3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
+  scene.add(new THREE.Points(starsGeo, new THREE.PointsMaterial({
+    color: 0xffffff, size: 0.9, transparent: true, opacity: 0.85
+  })));
+
+  // === Земля ===
+  var ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(1200, 1200),
+    new THREE.MeshStandardMaterial({
+      color: 0x0a0a1a, roughness: 1, metalness: 0
+    })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  var grid = new THREE.GridHelper(1200, 240, 0xff00ff, 0x6600aa);
+  grid.position.y = 0.01;
+  grid.material.opacity = 0.35;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  // === Дорога ===
+  var ROAD_W = 14;
+  var ROAD_L = 1200;
+
+  var road = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROAD_W, ROAD_L),
+    new THREE.MeshStandardMaterial({
+      color: 0x151515, roughness: 0.85, metalness: 0.15
+    })
+  );
+  road.rotation.x = -Math.PI / 2;
+  road.position.y = 0.02;
+  road.receiveShadow = true;
+  scene.add(road);
+
+  // Разметка
+  for (var i = -80; i < 80; i++) {
+    var dash = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.3, 3),
+      new THREE.MeshBasicMaterial({ color: 0xffff00 })
+    );
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(0, 0.03, i * 8);
+    scene.add(dash);
+  }
+
+  // Неоновые линии
+  [-1, 1].forEach(function(side) {
+    var line = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.25, ROAD_L),
+      new THREE.MeshBasicMaterial({ color: 0xff00ff })
+    );
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(side * ROAD_W / 2, 0.03, 0);
+    scene.add(line);
+  });
+
+  // === Пальмы ===
+  function createPalm(x, z) {
+    var palm = new THREE.Group();
+    var trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.28, 5, 6),
+      new THREE.MeshStandardMaterial({ color: 0x4a2511 })
+    );
+    trunk.position.y = 2.5;
+    trunk.castShadow = true;
+    palm.add(trunk);
+
+    for (var i = 0; i < 7; i++) {
+      var leaf = new THREE.Mesh(
+        new THREE.ConeGeometry(0.35, 2.8, 4),
+        new THREE.MeshStandardMaterial({ color: 0x00aa44 })
+      );
+      var a = (i / 7) * Math.PI * 2;
+      leaf.position.set(Math.cos(a) * 0.9, 5.1, Math.sin(a) * 0.9);
+      leaf.rotation.z = Math.cos(a) * 0.9;
+      leaf.rotation.x = Math.sin(a) * 0.9;
+      palm.add(leaf);
+    }
+    palm.position.set(x, 0, z);
+    scene.add(palm);
+  }
+
+  for (var i = -30; i < 30; i++) {
+    var z = i * 22 + Math.random() * 6;
+    createPalm(-ROAD_W / 2 - 4 - Math.random() * 3, z);
+    createPalm( ROAD_W / 2 + 4 + Math.random() * 3, z);
+  }
+
+  // === Здания ===
+  function createBuilding(x, z) {
+    var h = 6 + Math.random() * 22;
+    var w = 3 + Math.random() * 3;
+    var d = 3 + Math.random() * 3;
+    var b = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({
+        color: 0x1a0a33, emissive: 0x330055, emissiveIntensity: 0.6
       })
     );
-    win.position.set(
-      x + (Math.random() - 0.5) * (w - 0.5),
-      1 + Math.random() * (h - 2),
-      z + (d / 2 + 0.02) * (Math.random() > 0.5 ? 1 : -1)
-    );
-    scene.add(win);
-  }
-}
-for (let i = 0; i < 30; i++) {
-  const side = Math.random() > 0.5 ? 1 : -1;
-  createBuilding(
-    side * (25 + Math.random() * 60),
-    (Math.random() - 0.5) * 400
-  );
-}
+    b.position.set(x, h / 2, z);
+    b.castShadow = true;
+    scene.add(b);
 
-// ================================================================
-//             BMW M5 F90 — серо-графитовая, чёрная крыша
-// ================================================================
-const car = new THREE.Group();
-
-// --- МАТЕРИАЛЫ ---
-const grayBody = new THREE.MeshStandardMaterial({
-  color: 0x4a4a50, roughness: 0.35, metalness: 0.85,
-});
-const blackRoof = new THREE.MeshStandardMaterial({
-  color: 0x101014, roughness: 0.4, metalness: 0.6,
-});
-const blackTrim = new THREE.MeshStandardMaterial({
-  color: 0x0a0a0a, roughness: 0.7, metalness: 0.3,
-});
-const darkChrome = new THREE.MeshStandardMaterial({
-  color: 0x1a1a1a, roughness: 0.25, metalness: 1,
-});
-const glassMat = new THREE.MeshStandardMaterial({
-  color: 0x050508, roughness: 0.05, metalness: 0.95,
-  transparent: true, opacity: 0.85,
-});
-const headlightMat = new THREE.MeshStandardMaterial({
-  color: 0xffffff, emissive: 0xaaddff, emissiveIntensity: 1.2,
-  roughness: 0.1, metalness: 0.6,
-});
-const drlMat = new THREE.MeshStandardMaterial({
-  color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 2,
-});
-const grilleMat = new THREE.MeshStandardMaterial({
-  color: 0x08080a, roughness: 0.5, metalness: 0.7,
-});
-const tailMat = new THREE.MeshStandardMaterial({
-  color: 0x330000, emissive: 0xff0000, emissiveIntensity: 0.6,
-});
-
-const L = 5.0, W = 1.95, H = 0.75;
-
-// --- НИЖНИЙ КУЗОВ ---
-const lowerBody = new THREE.Mesh(
-  new THREE.BoxGeometry(L, H, W),
-  grayBody
-);
-lowerBody.position.y = 0.8;
-lowerBody.castShadow = true;
-car.add(lowerBody);
-
-// --- КАПОТ ---
-const hood = new THREE.Mesh(
-  new THREE.BoxGeometry(1.6, 0.25, W * 0.98),
-  grayBody
-);
-hood.position.set(1.7, 1.15, 0);
-hood.rotation.z = -0.06;
-hood.castShadow = true;
-car.add(hood);
-
-// --- POWER DOME на капоте ---
-const powerDome = new THREE.Mesh(
-  new THREE.BoxGeometry(0.9, 0.08, 0.7),
-  grayBody
-);
-powerDome.position.set(1.5, 1.3, 0);
-car.add(powerDome);
-
-// --- ПЕРЕХОД К КРЫШЕ ---
-const cowl = new THREE.Mesh(
-  new THREE.BoxGeometry(0.6, 0.4, W * 0.96),
-  grayBody
-);
-cowl.position.set(0.85, 1.25, 0);
-car.add(cowl);
-
-// --- ЧЁРНАЯ КРЫША ---
-const roof = new THREE.Mesh(
-  new THREE.BoxGeometry(1.6, 0.55, W * 0.88),
-  blackRoof
-);
-roof.position.set(-0.4, 1.5, 0);
-roof.castShadow = true;
-car.add(roof);
-
-// --- ЛОБОВОЕ СТЕКЛО (наклонное) ---
-const windshield = new THREE.Mesh(
-  new THREE.BoxGeometry(1.3, 0.75, W * 0.85),
-  glassMat
-);
-windshield.position.set(0.85, 1.45, 0);
-windshield.rotation.z = -0.65;
-car.add(windshield);
-
-// --- ЗАДНЕЕ СТЕКЛО ---
-const rearGlassMesh = new THREE.Mesh(
-  new THREE.BoxGeometry(1.0, 0.65, W * 0.85),
-  glassMat
-);
-rearGlassMesh.position.set(-1.45, 1.45, 0);
-rearGlassMesh.rotation.z = 0.55;
-car.add(rearGlassMesh);
-
-// --- БОКОВЫЕ СТЁКЛА + B-СТОЙКА ---
-[-1, 1].forEach(side => {
-  const sideWin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.9, 0.5, 0.03),
-    glassMat
-  );
-  sideWin.position.set(-0.4, 1.6, side * (W * 0.44 + 0.01));
-  car.add(sideWin);
-
-  const pillar = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.55, 0.05),
-    blackRoof
-  );
-  pillar.position.set(-0.4, 1.55, side * (W * 0.44 + 0.02));
-  car.add(pillar);
-});
-
-// --- БАГАЖНИК ---
-const trunk = new THREE.Mesh(
-  new THREE.BoxGeometry(0.9, 0.35, W * 0.95),
-  grayBody
-);
-trunk.position.set(-2.15, 1.15, 0);
-car.add(trunk);
-
-// ============ ПЕРЕДОК ============
-// Передний бампер
-const frontBumper = new THREE.Mesh(
-  new THREE.BoxGeometry(0.45, 0.75, W),
-  grayBody
-);
-frontBumper.position.set(2.5, 0.75, 0);
-frontBumper.castShadow = true;
-car.add(frontBumper);
-
-// Чёрная "губа"
-const frontLip = new THREE.Mesh(
-  new THREE.BoxGeometry(0.5, 0.15, W * 0.98),
-  blackTrim
-);
-frontLip.position.set(2.55, 0.4, 0);
-car.add(frontLip);
-
-// Воздухозаборник центральный
-const intakeCenter = new THREE.Mesh(
-  new THREE.BoxGeometry(0.15, 0.35, 0.8),
-  blackTrim
-);
-intakeCenter.position.set(2.68, 0.7, 0);
-car.add(intakeCenter);
-
-// Воздухозаборники боковые
-[-1, 1].forEach(side => {
-  const intake = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 0.3, 0.35),
-    blackTrim
-  );
-  intake.position.set(2.68, 0.7, side * 0.75);
-  car.add(intake);
-});
-
-// --- РЕШЁТКА "НОЗДРИ" ---
-[-0.28, 0.28].forEach(zOff => {
-  const grille = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.55, 0.5),
-    grilleMat
-  );
-  grille.position.set(2.68, 1.1, zOff);
-  car.add(grille);
-
-  // Вертикальные рёбра
-  for (let i = -2; i <= 2; i++) {
-    const rib = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.5, 0.03),
-      darkChrome
-    );
-    rib.position.set(2.7, 1.1, zOff + i * 0.08);
-    car.add(rib);
-  }
-});
-
-// --- ФАРЫ (LED, узкие) ---
-[-1, 1].forEach(side => {
-  const headlight = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 0.3, 0.55),
-    headlightMat
-  );
-  headlight.position.set(2.68, 1.15, side * 0.65);
-  car.add(headlight);
-
-  const drl = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.06, 0.55),
-    drlMat
-  );
-  drl.position.set(2.69, 1.28, side * 0.65);
-  car.add(drl);
-});
-
-// ============ ЗАДОК ============
-const rearBumper = new THREE.Mesh(
-  new THREE.BoxGeometry(0.4, 0.75, W),
-  grayBody
-);
-rearBumper.position.set(-2.6, 0.75, 0);
-car.add(rearBumper);
-
-// --- ФОНАРИ ---
-[-1, 1].forEach(side => {
-  const tlMain = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.2, 0.75),
-    tailMat.clone()
-  );
-  tlMain.position.set(-2.78, 1.05, side * 0.6);
-  tlMain.userData.isBrake = true;
-  car.add(tlMain);
-  taillights.push(tlMain);
-
-  const tlInner = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1, 0.15, 0.35),
-    tailMat.clone()
-  );
-  tlInner.position.set(-2.78, 1.05, side * 0.15);
-  car.add(tlInner);
-});
-
-// Чёрная полоса между фонарями
-const tailStrip = new THREE.Mesh(
-  new THREE.BoxGeometry(0.06, 0.06, W * 0.85),
-  blackTrim
-);
-tailStrip.position.set(-2.78, 1.05, 0);
-car.add(tailStrip);
-
-// --- ДИФФУЗОР задний ---
-const diffuser = new THREE.Mesh(
-  new THREE.BoxGeometry(0.35, 0.25, W * 0.85),
-  blackTrim
-);
-diffuser.position.set(-2.72, 0.5, 0);
-car.add(diffuser);
-
-// Рёбра диффузора
-for (let i = -3; i <= 3; i++) {
-  const fin = new THREE.Mesh(
-    new THREE.BoxGeometry(0.4, 0.2, 0.05),
-    blackTrim
-  );
-  fin.position.set(-2.72, 0.5, i * 0.22);
-  car.add(fin);
-}
-
-// --- ВЫХЛОП (4 трубы, как у M5) ---
-[-0.55, -0.35, 0.35, 0.55].forEach(zOff => {
-  const pipe = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 0.3, 12),
-    darkChrome
-  );
-  pipe.rotation.z = Math.PI / 2;
-  pipe.position.set(-2.82, 0.42, zOff);
-  car.add(pipe);
-});
-
-// --- СПОЙЛЕР на багажнике ---
-const spoiler = new THREE.Mesh(
-  new THREE.BoxGeometry(0.2, 0.06, W * 0.7),
-  blackRoof
-);
-spoiler.position.set(-2.4, 1.38, 0);
-car.add(spoiler);
-
-// --- ЗЕРКАЛА ---
-[-1, 1].forEach(side => {
-  const stem = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 0.05, 0.15),
-    blackRoof
-  );
-  stem.position.set(0.7, 1.45, side * 1.02);
-  car.add(stem);
-
-  const mirror = new THREE.Mesh(
-    new THREE.BoxGeometry(0.18, 0.22, 0.28),
-    grayBody
-  );
-  mirror.position.set(0.75, 1.5, side * 1.18);
-  car.add(mirror);
-});
-
-// --- ПОЛОСА M (триколор) на капоте ---
-const mColors = [0x0066cc, 0x6600cc, 0xcc0000];
-mColors.forEach((color, i) => {
-  const stripe = new THREE.Mesh(
-    new THREE.BoxGeometry(4.5, 0.03, 0.18),
-    new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 0.4,
-    })
-  );
-  stripe.position.set(0, 1.19, -0.35 + i * 0.35);
-  car.add(stripe);
-});
-
-// --- КОЛЁСА (M5 double-spoke) ---
-const wheels = [];
-const wheelPositions = [
-  [ 1.6, 0.55,  1.05],
-  [ 1.6, 0.55, -1.05],
-  [-1.6, 0.55,  1.05],
-  [-1.6, 0.55, -1.05],
-];
-
-wheelPositions.forEach(pos => {
-  const wheel = new THREE.Group();
-
-  // Шина
-  const tire = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.55, 0.55, 0.4, 24),
-    new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.95 })
-  );
-  tire.rotation.x = Math.PI / 2;
-  tire.castShadow = true;
-  wheel.add(tire);
-
-  // Диск
-  const rim = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.38, 0.38, 0.42, 24),
-    new THREE.MeshStandardMaterial({
-      color: 0x2a2a2a, metalness: 1, roughness: 0.35,
-    })
-  );
-  rim.rotation.x = Math.PI / 2;
-  wheel.add(rim);
-
-  // Спицы (двойные, 5 пар = 10 спиц)
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    [-0.06, 0.06].forEach(offset => {
-      const spoke = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.04, 0.04),
-        new THREE.MeshStandardMaterial({
-          color: 0xcccccc, metalness: 1, roughness: 0.2,
+    for (var i = 0; i < 6; i++) {
+      var win = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.4, 0.5),
+        new THREE.MeshBasicMaterial({
+          color: Math.random() > 0.5 ? 0x00ffff : 0xff66ff
         })
       );
-      spoke.rotation.z = a;
-      spoke.position.y = offset;
-      wheel.add(spoke);
-    });
-  }
-
-  // Центральный колпак
-  const cap = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.1, 0.1, 0.45, 12),
-    new THREE.MeshStandardMaterial({
-      color: 0x111111, metalness: 0.9, roughness: 0.2,
-    })
-  );
-  cap.rotation.x = Math.PI / 2;
-  wheel.add(cap);
-
-  wheel.position.set(...pos);
-  car.add(wheel);
-  wheels.push(wheel);
-});
-
-// Тень под машиной
-const carShadow = new THREE.Mesh(
-  new THREE.PlaneGeometry(5.5, 2.6),
-  new THREE.MeshBasicMaterial({
-    color: 0x000000, transparent: true, opacity: 0.5,
-  })
-);
-carShadow.rotation.x = -Math.PI / 2;
-carShadow.position.y = 0.04;
-car.add(carShadow);
-
-scene.add(car);
-
-// ================================================================
-//                        УПРАВЛЕНИЕ
-// ================================================================
-const keys = { left: false, right: false, forward: false, back: false };
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft'  || e.key === 'a') keys.left = true;
-  if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-  if (e.key === 'ArrowUp'    || e.key === 'w') keys.forward = true;
-  if (e.key === 'ArrowDown'  || e.key === 's') keys.back = true;
-});
-document.addEventListener('keyup', e => {
-  if (e.key === 'ArrowLeft'  || e.key === 'a') keys.left = false;
-  if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
-  if (e.key === 'ArrowUp'    || e.key === 'w') keys.forward = false;
-  if (e.key === 'ArrowDown'  || e.key === 's') keys.back = false;
-});
-
-function bindBtn(id, key) {
-  const el = document.getElementById(id);
-  const on  = e => { e.preventDefault(); keys[key] = true; };
-  const off = e => { e.preventDefault(); keys[key] = false; };
-  el.addEventListener('touchstart', on, {passive:false});
-  el.addEventListener('touchend', off, {passive:false});
-  el.addEventListener('touchcancel', off, {passive:false});
-  el.addEventListener('mousedown', on);
-  el.addEventListener('mouseup', off);
-  el.addEventListener('mouseleave', off);
-}
-bindBtn('btnLeft', 'left');
-bindBtn('btnRight', 'right');
-bindBtn('btnForward', 'forward');
-bindBtn('btnBack', 'back');
-
-// === Физика ===
-let speedZ = 0;
-let carAngle = 0;
-const MAX_SPEED_Z = 0.8;
-const ACCEL_Z = 0.025;
-const BRAKE_Z = 0.05;
-const FRICTION_Z = 0.97;
-const TURN_SPEED = 0.035;
-
-// === Частицы выхлопа ===
-const exhaustParticles = [];
-const exhaustGeo = new THREE.SphereGeometry(0.13, 6, 6);
-
-function spawnExhaust() {
-  const p = new THREE.Mesh(
-    exhaustGeo,
-    new THREE.MeshBasicMaterial({
-      color: 0xff8800, transparent: true, opacity: 0.85,
-    })
-  );
-  const offset = new THREE.Vector3(-2.9, 0.4, 0.5);
-  offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), carAngle);
-  p.position.copy(car.position).add(offset);
-  scene.add(p);
-  exhaustParticles.push({
-    mesh: p, life: 1,
-    vx: Math.sin(carAngle) * 0.15 + (Math.random() - 0.5) * 0.05,
-    vz: Math.cos(carAngle) * 0.15 + (Math.random() - 0.5) * 0.05,
-    vy: 0.04 + Math.random() * 0.04,
-  });
-}
-
-// === Следы шин ===
-const skidMarks = [];
-const skidGeo = new THREE.PlaneGeometry(0.35, 0.5);
-
-function spawnSkid(worldX, worldZ) {
-  const m = new THREE.Mesh(
-    skidGeo,
-    new THREE.MeshBasicMaterial({
-      color: 0x000000, transparent: true, opacity: 0.7,
-    })
-  );
-  m.rotation.x = -Math.PI / 2;
-  m.rotation.z = carAngle;
-  m.position.set(worldX, 0.05, worldZ);
-  scene.add(m);
-  skidMarks.push({ mesh: m, life: 1 });
-  if (skidMarks.length > 300) {
-    scene.remove(skidMarks[0].mesh);
-    skidMarks.shift();
-  }
-}
-
-// === HUD ===
-const speedEl = document.getElementById('speed');
-
-// === Цикл ===
-let lastTime = performance.now();
-let skidTimer = 0;
-let exhaustTimer = 0;
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  const now = performance.now();
-  const dt = Math.min((now - lastTime) / 16.67, 2);
-  lastTime = now;
-
-  // Газ/тормоз
-  if (keys.forward) {
-    speedZ += ACCEL_Z * dt;
-  } else if (keys.back) {
-    speedZ -= BRAKE_Z * dt;
-  } else {
-    speedZ *= FRICTION_Z;
-    if (Math.abs(speedZ) < 0.002) speedZ = 0;
-  }
-  speedZ = Math.max(-MAX_SPEED_Z * 0.4, Math.min(MAX_SPEED_Z, speedZ));
-
-  // Поворот
-  let turnInput = 0;
-  if (keys.left)  turnInput = 1;
-  if (keys.right) turnInput = -1;
-
-  const speedFactor = Math.min(Math.abs(speedZ) / 0.2, 1);
-  if (Math.abs(speedZ) > 0.05) {
-    carAngle += turnInput * TURN_SPEED * dt * speedFactor * Math.sign(speedZ);
-  } else if (Math.abs(speedZ) < 0.02) {
-    carAngle += turnInput * TURN_SPEED * 0.3 * dt;
-  }
-
-  car.rotation.y = carAngle;
-
-  // Движение
-  const forwardX = Math.sin(carAngle);
-  const forwardZ = Math.cos(carAngle);
-  car.position.x += forwardX * speedZ * dt * 10;
-  car.position.z += forwardZ * speedZ * dt * 10;
-
-  // Колёса
-  wheels.forEach(w => { w.rotation.z -= speedZ * 0.5; });
-
-  // Стоп-сигналы
-  const braking = (keys.back && speedZ > 0.02);
-  taillights.forEach(t => {
-    if (t.userData?.isBrake) {
-      t.material.emissiveIntensity = braking ? 3 : 0.6;
-    }
-  });
-
-  // Выхлоп
-  exhaustTimer += dt;
-  if (keys.forward && exhaustTimer > 2) {
-    spawnExhaust();
-    exhaustTimer = 0;
-  }
-
-  // Частицы
-  for (let i = exhaustParticles.length - 1; i >= 0; i--) {
-    const p = exhaustParticles[i];
-    p.mesh.position.x += p.vx * dt;
-    p.mesh.position.z += p.vz * dt;
-    p.mesh.position.y += p.vy * dt;
-    p.life -= 0.02 * dt;
-    p.mesh.material.opacity = p.life * 0.85;
-    p.mesh.scale.setScalar(1 + (1 - p.life) * 2);
-    if (p.life <= 0) {
-      scene.remove(p.mesh);
-      exhaustParticles.splice(i, 1);
-    }
-  }
-
-  // Следы шин
-  skidTimer += dt;
-  if (Math.abs(speedZ) > 0.1 && skidTimer > 3) {
-    skidTimer = 0;
-    const cs = Math.cos(carAngle), sn = Math.sin(carAngle);
-    [[-1.6, 1.05], [-1.6, -1.05]].forEach(([lx, lz]) => {
-      spawnSkid(
-        car.position.x + (lx * cs + lz * sn),
-        car.position.z + (-lx * sn + lz * cs)
+      win.position.set(
+        x + (Math.random() - 0.5) * (w - 0.5),
+        1 + Math.random() * (h - 2),
+        z + (d / 2 + 0.02) * (Math.random() > 0.5 ? 1 : -1)
       );
-    });
-  }
-  for (let i = skidMarks.length - 1; i >= 0; i--) {
-    const m = skidMarks[i];
-    m.life -= 0.002 * dt;
-    m.mesh.material.opacity = m.life * 0.7;
-    if (m.life <= 0) {
-      scene.remove(m.mesh);
-      skidMarks.splice(i, 1);
+      scene.add(win);
     }
   }
+  for (var i = 0; i < 30; i++) {
+    var side = Math.random() > 0.5 ? 1 : -1;
+    createBuilding(
+      side * (25 + Math.random() * 60),
+      (Math.random() - 0.5) * 400
+    );
+  }
 
-  // Камера
-  const camDist = 12;
-  const camHeight = 6;
-  const camX = car.position.x - Math.sin(carAngle) * camDist;
-  const camZ = car.position.z - Math.cos(carAngle) * camDist;
+  // ============================================================
+  //             BMW M5 F90
+  // ============================================================
+  var car = new THREE.Group();
+  var taillights = [];
 
-  camera.position.x += (camX - camera.position.x) * 0.07;
-  camera.position.y += (camHeight - camera.position.y) * 0.07;
-  camera.position.z += (camZ - camera.position.z) * 0.07;
+  var grayBody = new THREE.MeshStandardMaterial({
+    color: 0x4a4a50, roughness: 0.35, metalness: 0.85
+  });
+  var blackRoof = new THREE.MeshStandardMaterial({
+    color: 0x101014, roughness: 0.4, metalness: 0.6
+  });
+  var blackTrim = new THREE.MeshStandardMaterial({
+    color: 0x0a0a0a, roughness: 0.7, metalness: 0.3
+  });
+  var darkChrome = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a, roughness: 0.25, metalness: 1
+  });
+  var glassMat = new THREE.MeshStandardMaterial({
+    color: 0x050508, roughness: 0.05, metalness: 0.95,
+    transparent: true, opacity: 0.85
+  });
+  var headlightMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, emissive: 0xaaddff, emissiveIntensity: 1.2,
+    roughness: 0.1, metalness: 0.6
+  });
+  var drlMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 2
+  });
+  var grilleMat = new THREE.MeshStandardMaterial({
+    color: 0x08080a, roughness: 0.5, metalness: 0.7
+  });
 
-  camera.lookAt(
-    car.position.x + Math.sin(carAngle) * 4,
-    1.5,
-    car.position.z + Math.cos(carAngle) * 4
+  var L = 5.0, W = 1.95, H = 0.75;
+
+  // Нижний кузов
+  var lowerBody = new THREE.Mesh(
+    new THREE.BoxGeometry(L, H, W), grayBody
   );
+  lowerBody.position.y = 0.8;
+  lowerBody.castShadow = true;
+  car.add(lowerBody);
 
-  fill.position.x = car.position.x;
-  fill.position.z = car.position.z;
+  // Капот
+  var hood = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.25, W * 0.98), grayBody
+  );
+  hood.position.set(1.7, 1.15, 0);
+  hood.rotation.z = -0.06;
+  hood.castShadow = true;
+  car.add(hood);
 
-  speedEl.textContent = Math.abs(Math.round(speedZ * 700));
+  // Power dome
+  var powerDome = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.08, 0.7), grayBody
+  );
+  powerDome.position.set(1.5, 1.3, 0);
+  car.add(powerDome);
 
-  renderer.render(scene, camera);
-}
+  // Cowl
+  var cowl = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6, 0.4, W * 0.96), grayBody
+  );
+  cowl.position.set(0.85, 1.25, 0);
+  car.add(cowl);
 
-camera.position.set(0, 6, -12);
-camera.lookAt(0, 1.5, 0);
+  // Крыша
+  var roof = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.55, W * 0.88), blackRoof
+  );
+  roof.position.set(-0.4, 1.5, 0);
+  roof.castShadow = true;
+  car.add(roof);
 
-animate();
+  // Лобовое
+  var windshield = new THREE.Mesh(
+    new THREE.BoxGeometry(1.3, 0.75, W * 0.85), glassMat
+  );
+  windshield.position.set(0.85, 1.45, 0);
+  windshield.rotation.z = -0.65;
+  car.add(windshield);
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-</script>
+  // Заднее стекло
+  var rearGlassMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.65, W * 0.85), glassMat
+  );
+  rearGlassMesh.position.set(-1.45, 1.45, 0);
+  rearGlassMesh.rotation.z = 0.55;
+  car.add(rearGlassMesh);
 
-</body>
-</html>
+  // Боковые стёкла
+  [-1, 1].forEach(function(side) {
+    var sideWin = new THREE.Mesh(
+      new THREE.BoxGeometry(1.9, 0.5, 0.03), glassMat
+    );
+    sideWin.position.set(-0.4, 1.6, side * (W * 0.44 + 0.01));
+    car.add(sideWin);
+
+    var pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.55, 0.05), blackRoof
+    );
+    pillar.position.set(-0.4, 1.55, side * (W * 0.44 + 0.02));
+    car.add(pillar);
+  });
+
+  // Багажник
+  var trunk = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.35, W * 0.95), grayBody
+  );
+  trunk.position.set(-2.15, 1.15, 0);
+  car.add(trunk);
+
+  // Передний бампер
+  var frontBumper = new THREE.Mesh(
+    new THREE.BoxGeometry(0.45, 0.75, W), grayBody
+  );
+  frontBumper.position.set(2.5, 0.75, 0);
+  frontBumper.castShadow = true;
+  car.add(frontBumper);
+
+  // Губа
+  var frontLip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.15, W * 0.98), blackTrim
+  );
+  frontLip.position.set(2.55, 0.4, 0);
+  car.add(frontLip);
+
+  // Воздухозаборники
+  var intakeCenter = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.35, 0.8), blackTrim
+  );
+  intakeCenter.position.set(2.68, 0.7, 0);
+  car.add(intakeCenter);
+
+  [-1, 1].forEach(function(side) {
+    var intake = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.3, 0.35), blackTrim
+    );
+    intake.position.set(2.68, 0.7, side * 0.75);
+    car.add(intake);
+  });
+
+  // Ноздри
+  [-0.28, 0.28].forEach(function(zOff) {
+    var grille = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.55, 0.5), grilleMat
+    );
+    grille.position.set(2.68, 1.1, zOff);
+    car.add(grille);
+
+    for (var i = -2; i <= 2; i++) {
+      var
